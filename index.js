@@ -41,7 +41,7 @@ app.get('/api/categories', async (req, res) => {
 app.get('/api/products', async (req, res) => {
   const { productsCategoryId, storeId, term } = req.query;
 
-  let query = 'SELECT * FROM product WHERE 1 = 1';
+  let query = 'SELECT * FROM product WHERE 1 = 1 AND active = 1';
   let countQuery = 'SELECT COUNT(*) as total FROM product WHERE 1 = 1';
   const params = [];
   const countParams = [];
