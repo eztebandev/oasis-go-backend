@@ -53,9 +53,11 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-// Obtener productos con filtros dinámicos
+// Obtener productos con filtros dinámicos y paginación
 app.get('/api/products-admin', async (req, res) => {
-  const { productsCategoryId, storeId, term } = req.query;
+  const { productsCategoryId, storeId, term, page = 1 } = req.query;
+  const limit = 10;
+  const offset = (page - 1) * limit;
 
   let query = 'SELECT * FROM product WHERE 1 = 1';
   let countQuery = 'SELECT COUNT(*) as total FROM product WHERE 1 = 1';
@@ -87,19 +89,29 @@ app.get('/api/products-admin', async (req, res) => {
     countParams.push(likeTerm);
   }
 
+  // Agregar paginación
+  query += ' LIMIT ? OFFSET ?';
+  params.push(limit, offset);
+
   try {
-    // Traer productos filtrados
+    // Traer productos filtrados y paginados
     const [products] = await pool.query(query, params);
 
     // Traer el total de registros que cumplen la condición
     const [countResult] = await pool.query(countQuery, countParams);
     const total = countResult[0]?.total || 0;
+    const totalPages = Math.ceil(total / limit);
 
     // Estructura de respuesta solicitada
     res.json({
       data: {
         products,
-        total
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit,
+          totalPages
+        }
       }
     });
   } catch (error) {
@@ -108,12 +120,14 @@ app.get('/api/products-admin', async (req, res) => {
   }
 });
 
-// Obtener productos con filtros dinámicos
+// Obtener productos con filtros dinámicos y paginación
 app.get('/api/products', async (req, res) => {
-  const { productsCategoryId, storeId, term } = req.query;
+  const { productsCategoryId, storeId, term, page = 1 } = req.query;
+  const limit = 10;
+  const offset = (page - 1) * limit;
 
   let query = 'SELECT * FROM product WHERE 1 = 1 AND active = 1';
-  let countQuery = 'SELECT COUNT(*) as total FROM product WHERE 1 = 1';
+  let countQuery = 'SELECT COUNT(*) as total FROM product WHERE 1 = 1 AND active = 1';
   const params = [];
   const countParams = [];
 
@@ -142,19 +156,29 @@ app.get('/api/products', async (req, res) => {
     countParams.push(likeTerm);
   }
 
+  // Agregar paginación
+  query += ' LIMIT ? OFFSET ?';
+  params.push(limit, offset);
+
   try {
-    // Traer productos filtrados
+    // Traer productos filtrados y paginados
     const [products] = await pool.query(query, params);
 
     // Traer el total de registros que cumplen la condición
     const [countResult] = await pool.query(countQuery, countParams);
     const total = countResult[0]?.total || 0;
+    const totalPages = Math.ceil(total / limit);
 
     // Estructura de respuesta solicitada
     res.json({
       data: {
         products,
-        total
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit,
+          totalPages
+        }
       }
     });
   } catch (error) {
