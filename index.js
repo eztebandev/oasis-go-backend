@@ -19,6 +19,7 @@ const s3Client = new S3Client({
   }
 });
 
+
 // Configuración de multer para subir archivos
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
