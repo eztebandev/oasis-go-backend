@@ -719,6 +719,6 @@ app.get('/api/routes/:id', async (req, res) => {
   }
 });
 
-const PORT = 3001;
+const PORT = 3306;
 app.listen(PORT, () => console.log(`Server on port ${PORT}`));
 
