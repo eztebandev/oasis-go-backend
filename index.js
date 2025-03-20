@@ -32,6 +32,18 @@ const pool = mysql.createPool({
   database: process.env.DB_NAME
 });
 
+app.post('/api/register-user', async (req, res) => {
+  const { name, email, password } = req.body;
+  const [rows] = await pool.query('INSERT INTO users (name, email, password) VALUES (?, ?, ?)', [name, email, password]);
+  res.json(rows);
+});
+
+app.get('/api/my-store', async (req, res) => {
+  const { userId } = req.query;
+  const [rows] = await pool.query('SELECT * FROM stores WHERE userId = ?', [userId]);
+  res.json(rows);
+});
+
 // Obtener usuarios
 app.get('/api/users', async (req, res) => {
   try {
