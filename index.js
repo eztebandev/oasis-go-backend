@@ -6,6 +6,10 @@ const multer = require('multer');
 const crypto = require('crypto');
 require('dotenv').config();
 
+// Importar la biblioteca de Google Maps Fleet Routing
+const { google } = require('googleapis');
+const axios = require('axios');
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -31,6 +35,10 @@ const pool = mysql.createPool({
   password: process.env.DB_PASS,
   database: process.env.DB_NAME
 });
+
+// Configuración de la API de Google Maps Fleet Routing
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+const fleetRoutingBaseUrl = 'https://fleetrouting.googleapis.com/v1';
 
 app.post('/api/register-user', async (req, res) => {
   const { name, email, password } = req.body;
@@ -397,6 +405,320 @@ app.get('/api/stores', async (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 3000;
+// Endpoint para optimizar rutas de entrega
+app.post('/api/optimize-routes', async (req, res) => {
+  try {
+    const { 
+      vehicles, 
+      deliveryLocations,
+      depot,
+      timeWindows
+    } = req.body;
+    
+    // Construir la solicitud para la API de Fleet Routing
+    const requestBody = {
+      model: {
+        globalStartTime: {
+          seconds: Math.floor(Date.now() / 1000)
+        },
+        globalEndTime: {
+          seconds: Math.floor(Date.now() / 1000) + 86400 // 24 horas después
+        },
+        vehicles: vehicles.map((vehicle, index) => ({
+          vehicleId: vehicle.id.toString(),
+          loadLimits: {
+            weight: {
+              maxLoad: vehicle.maxWeight || 1000
+            }
+          },
+          startLocation: {
+            latitude: depot.latitude,
+            longitude: depot.longitude
+          },
+          endLocation: {
+            latitude: depot.latitude,
+            longitude: depot.longitude
+          }
+        })),
+        shipments: deliveryLocations.map((location, index) => ({
+          shipmentId: location.id.toString(),
+          deliveries: [{
+            arrivalLocation: {
+              latitude: location.latitude,
+              longitude: location.longitude
+            },
+            duration: {
+              seconds: 300 // 5 minutos para la entrega
+            },
+            timeWindows: timeWindows ? [{
+              startTime: {
+                seconds: Math.floor(new Date(timeWindows.start).getTime() / 1000)
+              },
+              endTime: {
+                seconds: Math.floor(new Date(timeWindows.end).getTime() / 1000)
+              }
+            }] : []
+          }],
+          loadDemands: {
+            weight: {
+              amount: location.weight || 1
+            }
+          }
+        }))
+      },
+      solvingMode: 'SOLVE'
+    };
+    
+    // Realizar la solicitud a la API de Fleet Routing
+    const response = await axios.post(
+      `${fleetRoutingBaseUrl}/optimizeRoutes?key=${GOOGLE_MAPS_API_KEY}`,
+      requestBody
+    );
+    
+    // Procesar y devolver los resultados
+    res.json({
+      data: {
+        routes: response.data.routes,
+        metrics: response.data.metrics
+      }
+    });
+  } catch (error) {
+    console.error('Error al optimizar rutas:', error.response?.data || error.message);
+    res.status(500).json({ 
+      error: 'Error al optimizar rutas',
+      details: error.response?.data || error.message
+    });
+  }
+});
+
+// Endpoint para obtener información de ruta entre dos puntos
+app.post('/api/route-info', async (req, res) => {
+  try {
+    const { origin, destination, waypoints, mode = 'driving' } = req.body;
+    
+    // Construir la URL para la API de Directions
+    let url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}&mode=${mode}&key=${GOOGLE_MAPS_API_KEY}`;
+    
+    // Agregar waypoints si existen
+    if (waypoints && waypoints.length > 0) {
+      const waypointsStr = waypoints.map(wp => `${wp.latitude},${wp.longitude}`).join('|');
+      url += `&waypoints=${waypointsStr}`;
+    }
+    
+    // Realizar la solicitud a la API de Directions
+    const response = await axios.get(url);
+    
+    // Procesar y devolver los resultados
+    res.json({
+      data: {
+        routes: response.data.routes,
+        distance: response.data.routes[0]?.legs.reduce((acc, leg) => acc + leg.distance.value, 0) || 0,
+        duration: response.data.routes[0]?.legs.reduce((acc, leg) => acc + leg.duration.value, 0) || 0,
+        status: response.data.status
+      }
+    });
+  } catch (error) {
+    console.error('Error al obtener información de ruta:', error.response?.data || error.message);
+    res.status(500).json({ 
+      error: 'Error al obtener información de ruta',
+      details: error.response?.data || error.message
+    });
+  }
+});
+
+// Endpoint para geocodificar direcciones
+app.post('/api/geocode', async (req, res) => {
+  try {
+    const { address } = req.body;
+    
+    // Realizar la solicitud a la API de Geocoding
+    const response = await axios.get(
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_MAPS_API_KEY}`
+    );
+    
+    // Procesar y devolver los resultados
+    res.json({
+      data: {
+        results: response.data.results,
+        status: response.data.status
+      }
+    });
+  } catch (error) {
+    console.error('Error al geocodificar dirección:', error.response?.data || error.message);
+    res.status(500).json({ 
+      error: 'Error al geocodificar dirección',
+      details: error.response?.data || error.message
+    });
+  }
+});
+
+// Endpoint para geocodificación inversa (coordenadas a dirección)
+app.post('/api/reverse-geocode', async (req, res) => {
+  try {
+    const { latitude, longitude } = req.body;
+    
+    // Realizar la solicitud a la API de Geocoding inversa
+    const response = await axios.get(
+      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`
+    );
+    
+    // Procesar y devolver los resultados
+    res.json({
+      data: {
+        results: response.data.results,
+        status: response.data.status
+      }
+    });
+  } catch (error) {
+    console.error('Error en geocodificación inversa:', error.response?.data || error.message);
+    res.status(500).json({ 
+      error: 'Error en geocodificación inversa',
+      details: error.response?.data || error.message
+    });
+  }
+});
+
+// Endpoint para guardar una ruta planificada
+app.post('/api/save-route', async (req, res) => {
+  try {
+    const { 
+      name,
+      description,
+      vehicleId,
+      stops,
+      estimatedDistance,
+      estimatedDuration,
+      scheduledDate,
+      storeId
+    } = req.body;
+    
+    // Insertar la ruta en la base de datos
+    const [routeResult] = await pool.query(
+      'INSERT INTO routes (name, description, vehicleId, estimatedDistance, estimatedDuration, scheduledDate, storeId) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [name, description, vehicleId, estimatedDistance, estimatedDuration, scheduledDate, storeId]
+    );
+    
+    const routeId = routeResult.insertId;
+    
+    // Insertar las paradas de la ruta
+    for (let i = 0; i < stops.length; i++) {
+      const stop = stops[i];
+      await pool.query(
+        'INSERT INTO route_stops (routeId, orderId, address, latitude, longitude, stopOrder, estimatedArrivalTime) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [routeId, stop.orderId, stop.address, stop.latitude, stop.longitude, i, stop.estimatedArrivalTime]
+      );
+    }
+    
+    res.status(201).json({
+      data: {
+        id: routeId,
+        name,
+        description,
+        vehicleId,
+        stops,
+        estimatedDistance,
+        estimatedDuration,
+        scheduledDate,
+        storeId
+      }
+    });
+  } catch (error) {
+    console.error('Error al guardar ruta:', error);
+    res.status(500).json({ error: 'Error al guardar ruta' });
+  }
+});
+
+// Endpoint para obtener rutas planificadas
+app.get('/api/routes', async (req, res) => {
+  try {
+    const { storeId, date, page = 1 } = req.query;
+    const limit = 10;
+    const offset = (page - 1) * limit;
+    
+    let query = 'SELECT * FROM routes WHERE 1=1';
+    let countQuery = 'SELECT COUNT(*) as total FROM routes WHERE 1=1';
+    const params = [];
+    const countParams = [];
+    
+    if (storeId) {
+      query += ' AND storeId = ?';
+      countQuery += ' AND storeId = ?';
+      params.push(storeId);
+      countParams.push(storeId);
+    }
+    
+    if (date) {
+      query += ' AND DATE(scheduledDate) = DATE(?)';
+      countQuery += ' AND DATE(scheduledDate) = DATE(?)';
+      params.push(date);
+      countParams.push(date);
+    }
+    
+    query += ' ORDER BY scheduledDate DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    
+    const [routes] = await pool.query(query, params);
+    const [countResult] = await pool.query(countQuery, countParams);
+    const total = countResult[0]?.total || 0;
+    
+    // Para cada ruta, obtener sus paradas
+    for (const route of routes) {
+      const [stops] = await pool.query(
+        'SELECT * FROM route_stops WHERE routeId = ? ORDER BY stopOrder',
+        [route.id]
+      );
+      route.stops = stops;
+    }
+    
+    res.json({
+      data: {
+        routes,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit,
+          totalPages: Math.ceil(total / limit)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error al obtener rutas:', error);
+    res.status(500).json({ error: 'Error al obtener rutas' });
+  }
+});
+
+// Endpoint para obtener una ruta específica
+app.get('/api/routes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const [routes] = await pool.query('SELECT * FROM routes WHERE id = ?', [id]);
+    
+    if (routes.length === 0) {
+      return res.status(404).json({ error: 'Ruta no encontrada' });
+    }
+    
+    const route = routes[0];
+    
+    // Obtener las paradas de la ruta
+    const [stops] = await pool.query(
+      'SELECT * FROM route_stops WHERE routeId = ? ORDER BY stopOrder',
+      [id]
+    );
+    
+    route.stops = stops;
+    
+    res.json({
+      data: {
+        route
+      }
+    });
+  } catch (error) {
+    console.error('Error al obtener ruta:', error);
+    res.status(500).json({ error: 'Error al obtener ruta' });
+  }
+});
+
+const PORT = 3001;
 app.listen(PORT, () => console.log(`Server on port ${PORT}`));
 
